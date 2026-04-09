@@ -1,0 +1,96 @@
+# Default security policy for ai-security-guardrails
+# =========================================================
+# This policy defines how the guardrails system responds to
+# different risk levels in inputs and outputs.
+#
+# To customize for your application:
+# 1. Copy this file to policies/production_policy.yaml
+# 2. Set POLICY_FILE=policies/production_policy.yaml in your .env
+# 3. Adjust thresholds and actions for your use case
+#
+# Action values:
+#   allow                  — proceed without restriction
+#   allow_with_warning     — proceed but attach a warning flag to the audit log
+#   send_to_review         — queue for human review (application must handle this)
+#   block                  — reject the request and return a safe error message
+#   redact_and_warn        — apply redaction and attach a warning flag
+
+name: default
+version: "1.0"
+description: "Balanced policy for general-purpose LLM applications"
+
+# ---------------------------------------------------------------------------
+# Input controls
+# ---------------------------------------------------------------------------
+input:
+  # Hard limit on input character length. Inputs exceeding this are always blocked.
+  max_length: 10000
+
+  # Risk score threshold. Inputs with a score >= this value are escalated.
+  # Lower values = more aggressive filtering (more false positives).
+  # Higher values = more permissive (more false negatives).
+  risk_threshold: 0.7
+
+  # Action when injection signals are detected (e.g., "ignore all instructions")
+  on_injection_signal: send_to_review   # allow | allow_with_warning | send_to_review | block
+
+  # Action when sensitive data is detected in the input (credentials, PII)
+  on_sensitive_data: allow_with_warning
+
+  # How to respond when an input is blocked
+  on_block: return_safe_error_message
+
+# ---------------------------------------------------------------------------
+# Output controls
+# ---------------------------------------------------------------------------
+output:
+  # Risk score threshold for model outputs.
+  # Generally higher than input threshold — model outputs are less likely
+  # to contain injections but may contain sensitive data from the context.
+  risk_threshold: 0.8
+
+  # Automatically redact PII (emails, phone numbers, etc.) from all outputs.
+  # Set to false only if your application intentionally returns PII to users.
+  redact_pii: true
+
+  # Action when output risk score exceeds the threshold
+  on_high_risk: send_to_review
+
+  # Action when credentials or private keys are detected in model output
+  on_credential_detected: redact_and_warn
+
+# ---------------------------------------------------------------------------
+# Audit logging
+# ---------------------------------------------------------------------------
+audit:
+  enabled: true
+
+  # IMPORTANT: Never enable log_inputs or log_outputs in production.
+  # These settings exist for local debugging only. Raw inputs/outputs
+  # may contain sensitive user data that should not be persisted in logs.
+  log_inputs: false     # Set to true ONLY in isolated debug environments
+  log_outputs: false    # Set to true ONLY in isolated debug environments
+
+  # Always log decisions and scores — this is the minimum required for audit compliance
+  log_decisions: true
+  log_risk_scores: true
+
+# ---------------------------------------------------------------------------
+# Tool / agent controls
+# ---------------------------------------------------------------------------
+tools:
+  # If true, only tools explicitly listed in allowed_tools can be invoked by agents.
+  # This is the recommended setting — deny by default, allow explicitly.
+  approval_required: true
+
+  # List the tools your application is allowed to use.
+  # Empty list = all tools blocked. Add tool names as your application needs them.
+  allowed_tools: []
+  # Example:
+  # allowed_tools:
+  #   - search_knowledge_base
+  #   - get_weather
+  #   - create_calendar_event
+
+  # Maximum number of tool calls allowed per agent turn (prevents runaway loops)
+  max_tool_calls_per_turn: 5
