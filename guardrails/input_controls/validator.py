@@ -14,9 +14,12 @@ Limitations:
 """
 
 import re
-from enum import Enum
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Optional
+
+from guardrails.policy_engine.regex_rules import RegexRule, load_regex_rules
 
 
 class InputDecision(str, Enum):
@@ -48,7 +51,14 @@ class InputValidationResult:
 # intentionally conservative — prefer false positives over false negatives
 # for security-critical paths.
 _INJECTION_PATTERNS: list[tuple[str, str]] = [
-    (r"ignore (all |previous |above )?instructions?", "possible_instruction_override"),
+    (
+        r"ignore\s+(?:(?:all|any|the)\s+)?(?:(?:previous|prior|above|earlier)\s+)?instructions?",
+        "possible_instruction_override",
+    ),
+    (
+        r"forget\s+(?:(?:all|any|the)\s+)?(?:(?:previous|prior|above|earlier)\s+)?instructions?",
+        "possible_instruction_override",
+    ),
     (r"you are now (a |an )?", "possible_role_override"),
     (r"disregard (your |all |previous )", "possible_instruction_override"),
     (r"<\|?(system|user|assistant|im_start|im_end)\|?>", "possible_delimiter_injection"),
@@ -80,11 +90,31 @@ _SENSITIVE_DATA_PATTERNS: list[tuple[str, str]] = [
     (r"\b\d{3}-\d{2}-\d{4}\b", "possible_us_ssn"),
 ]
 
+_LEET_TRANSLATION = str.maketrans({
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "@": "a",
+    "$": "s",
+    "!": "i",
+})
+
+
+def _normalize_for_injection_scan(text: str) -> str:
+    """Normalize common prompt-injection obfuscation before heuristic scanning."""
+    lowered = text.lower().translate(_LEET_TRANSLATION)
+    return re.sub(r"[\u200b\u200c\u200d\ufeff\W_]+", " ", lowered)
+
 
 def validate_input(
     user_input: str,
     max_length: int = 10000,
     risk_threshold: float = 0.7,
+    regex_rule_set_path: str | Path | None = None,
+    regex_rules: list[RegexRule] | None = None,
 ) -> InputValidationResult:
     """
     Validate and risk-score a user input string.
@@ -103,6 +133,8 @@ def validate_input(
         user_input: Raw input from the user or application layer.
         max_length: Maximum allowed input length in characters.
         risk_threshold: Score at or above which input is escalated for review.
+        regex_rule_set_path: Optional YAML rule set for application-specific regex checks.
+        regex_rules: Optional preloaded rule objects, useful for long-lived services.
 
     Returns:
         InputValidationResult with decision, score, and flags.
@@ -120,11 +152,15 @@ def validate_input(
             original_length=len(user_input),
         )
 
-    lower_input = user_input.lower()
+    normalized_input = _normalize_for_injection_scan(user_input)
 
     # --- Injection signal scan ---
     for pattern, flag in _INJECTION_PATTERNS:
-        if re.search(pattern, lower_input, re.IGNORECASE):
+        if re.search(pattern, user_input, re.IGNORECASE) or re.search(
+            pattern,
+            normalized_input,
+            re.IGNORECASE,
+        ):
             flags.append(flag)
             risk_score += 0.35  # Each injection signal adds significant weight
 
@@ -133,6 +169,15 @@ def validate_input(
         if re.search(pattern, user_input, re.IGNORECASE):
             flags.append(flag)
             risk_score += 0.2   # Sensitive data adds moderate weight
+
+    # --- Application-specific YAML regex rule scan ---
+    custom_rules = regex_rules
+    if regex_rule_set_path is not None:
+        custom_rules = load_regex_rules(regex_rule_set_path)
+    for rule in custom_rules or []:
+        if rule.pattern.search(user_input):
+            flags.append(rule.flag)
+            risk_score += rule.score
 
     # Cap the score — multiple signals cannot push it beyond 1.0
     risk_score = min(risk_score, 1.0)

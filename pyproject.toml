@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-security-guardrails"
@@ -64,8 +64,8 @@ dev = [
 # CLI entry point
 k1n-guardrails = "guardrails.cli:cli"
 
-[tool.hatch.build.targets.wheel]
-packages = ["guardrails", "middleware", "schemas"]
+[tool.setuptools.packages.find]
+include = ["guardrails*", "middleware*", "schemas*"]
 
 [tool.ruff]
 line-length = 100

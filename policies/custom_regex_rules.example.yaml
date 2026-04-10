@@ -1,0 +1,17 @@
+# Optional application-specific regex rules.
+#
+# Pass this file to validate_input(..., regex_rule_set_path="...") or to:
+#
+#   k1n-guardrails validate-input --regex-rule-set policies/custom_regex_rules.example.yaml --text "..."
+#
+# Keep these patterns narrowly scoped and code-reviewed; broad expressions can
+# create noisy false positives in production traffic.
+
+rules:
+  - id: tenant-internal-secret-marker
+    flag: internal_secret_marker
+    category: sensitive_data
+    description: "Example internal secret marker used by one tenant."
+    pattern: "\\bINTERNAL_SECRET_[A-Z0-9]{8,}\\b"
+    score: 0.3
+

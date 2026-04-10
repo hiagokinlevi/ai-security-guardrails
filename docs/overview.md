@@ -42,6 +42,20 @@ The policy engine loads a YAML configuration file and maps risk scores and signa
 Every guardrail decision is recorded as a structured JSON event. The audit trail is the primary
 mechanism for governance, compliance review, and incident investigation.
 
+### Offline validation CLI
+
+`k1n-guardrails validate-input` and `k1n-guardrails detect-injection` provide JSON output for CI
+jobs, pre-deployment review, and incident-response triage where teams need to evaluate a prompt,
+retrieved context file, or tool result without calling an external model API.
+
+The input validator scans both the raw text and a normalized view that collapses common leetspeak,
+zero-width characters, punctuation, and spacing tricks used to disguise instruction-override
+phrases. Review and block decisions return nonzero exit codes so shell pipelines can fail closed.
+
+For tenant or application-specific controls, pass `--regex-rule-set` or call `validate_input()` with
+`regex_rule_set_path`. YAML-backed rules are compiled locally, stay offline, and add reviewed flags
+and scores to the same validation result.
+
 ## What it is not
 
 - **Not a firewall** — it does not inspect network traffic or enforce network-level policies.

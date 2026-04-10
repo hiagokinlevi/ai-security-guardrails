@@ -14,15 +14,17 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [x] FastAPI middleware integration
 - [x] Default policy for general-purpose LLM apps
 - [x] Pydantic schemas for all events
+- [x] Offline JSON CLI for input validation and prompt injection scans
+- [x] Basic obfuscation normalization for instruction-override detection
 
 ---
 
 ## v0.2 — Improved Detection
 
 - [ ] Embedding-based injection detection (semantic similarity to known injection patterns)
-- [ ] Configurable regex rule sets loaded from YAML
+- [x] Configurable regex rule sets loaded from YAML
 - [ ] Per-tenant policy support (multi-tenant applications)
-- [ ] Token budget enforcement via tiktoken integration
+- [x] Token budget enforcement via tiktoken integration
 - [ ] Rate limiting per user / session
 
 ---

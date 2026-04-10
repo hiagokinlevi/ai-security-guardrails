@@ -40,6 +40,11 @@ input:
   # How to respond when an input is blocked
   on_block: return_safe_error_message
 
+  # Optional: keep application-specific regex rules in a separate reviewed YAML file.
+  # Use policies/custom_regex_rules.example.yaml as a schema reference and pass the
+  # file path to validate_input(..., regex_rule_set_path="...") or the CLI's
+  # --regex-rule-set option.
+
 # ---------------------------------------------------------------------------
 # Output controls
 # ---------------------------------------------------------------------------
