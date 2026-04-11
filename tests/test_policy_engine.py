@@ -120,6 +120,16 @@ class TestLoadPolicy:
             with pytest.raises(ValueError, match="risk_threshold.*<= 1.0"):
                 load_policy(path)
 
+    def test_boolean_threshold_raises(self) -> None:
+        bad_policy = {
+            **DEFAULT_POLICY_DICT,
+            "input": {**DEFAULT_POLICY_DICT["input"], "risk_threshold": True},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="risk_threshold.*numeric, not boolean"):
+                load_policy(path)
+
     def test_invalid_allowed_tools_raises(self) -> None:
         bad_policy = {
             **DEFAULT_POLICY_DICT,

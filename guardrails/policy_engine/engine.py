@@ -118,6 +118,10 @@ def _get_typed_value(
 ) -> _NumberT | bool | str | list[str]:
     """Read and validate a typed scalar from a policy section."""
     value = section.get(key, default)
+    numeric_expected = expected_type in (int, float) or (
+        isinstance(expected_type, tuple) and any(t in (int, float) for t in expected_type)
+    )
+
     if isinstance(expected_type, tuple):
         if not isinstance(value, expected_type):
             expected_names = ", ".join(t.__name__ for t in expected_type)
@@ -125,7 +129,7 @@ def _get_typed_value(
     elif not isinstance(value, expected_type):
         raise ValueError(f"Policy field '{key}' must be of type {expected_type.__name__}.")
 
-    if isinstance(value, bool) and expected_type in (int, float):
+    if isinstance(value, bool) and numeric_expected:
         raise ValueError(f"Policy field '{key}' must be numeric, not boolean.")
 
     if isinstance(value, (int, float)):
