@@ -62,6 +62,15 @@ _REDACTION_RULES: list[tuple[re.Pattern[str], str, str]] = [
         r"\1=[REDACTED:API_CREDENTIAL]",
         "api_credential",
     ),
+    # Authorization headers carrying bearer tokens
+    (
+        re.compile(
+            r"((?:proxy-)?authorization)\s*([:=])\s*bearer\s+([A-Za-z0-9._~+/=-]{20,})",
+            re.IGNORECASE,
+        ),
+        r"\1\2 Bearer [REDACTED:BEARER_TOKEN]",
+        "bearer_token",
+    ),
     # Password / secret in assignment format
     (
         re.compile(

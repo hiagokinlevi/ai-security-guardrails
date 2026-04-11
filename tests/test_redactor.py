@@ -58,6 +58,12 @@ class TestRedactSensitiveData:
         result = redact_sensitive_data(text)
         assert "MyS3cr3tP@ssword" not in result
 
+    def test_authorization_bearer_header_is_redacted(self) -> None:
+        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadsig"
+        result = redact_sensitive_data(text)
+        assert "payloadsig" not in result
+        assert "[REDACTED:BEARER_TOKEN]" in result
+
     def test_private_ip_is_redacted(self) -> None:
         text = "Server address: 192.168.1.100"
         result = redact_sensitive_data(text)
@@ -120,3 +126,9 @@ class TestRedactWithReport:
         result = redact_with_report(text)
         assert "email" in result.redacted_types
         assert "credit_card" in result.redacted_types
+
+    def test_bearer_token_type_is_recorded(self) -> None:
+        text = "Proxy-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadsig"
+        result = redact_with_report(text)
+        assert "bearer_token" in result.redacted_types
+        assert "[REDACTED:BEARER_TOKEN]" in result.redacted_text

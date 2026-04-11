@@ -62,6 +62,8 @@ _OUTPUT_RISK_PATTERNS: list[tuple[str, str, float]] = [
     # AWS credentials
     (r"\bAKIA[0-9A-Z]{16}\b", "aws_access_key_in_output", 0.8),
     (r"aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*\S+", "aws_secret_in_output", 0.9),
+    (r"(?:proxy-)?authorization\s*[:=]\s*bearer\s+[A-Za-z0-9._~+/=-]{20,}",
+     "bearer_token_in_output", 0.9),
 
     # Generic API key / token patterns
     (r"(api[_-]?key|api[_-]?secret|access[_-]?token|auth[_-]?token)\s*[:=]\s*[\w\-./+]{20,}",
