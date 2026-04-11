@@ -190,6 +190,40 @@ class TestRateLimit:
 
 
 # ===========================================================================
+# Call depth
+# ===========================================================================
+
+class TestCallDepth:
+    engine = ToolPolicyEngine(policies=[
+        ToolPolicy(tool_name="web_search", allowed=True, max_call_depth=2)
+    ])
+
+    def test_depth_below_limit_allowed(self):
+        r = self.engine.evaluate(ToolCallRequest(tool_name="web_search", call_depth=1))
+        assert r.decision == PolicyDecision.ALLOW
+
+    def test_depth_equal_to_limit_allowed(self):
+        r = self.engine.evaluate(ToolCallRequest(tool_name="web_search", call_depth=2))
+        assert r.decision == PolicyDecision.ALLOW
+
+    def test_depth_above_limit_denied(self):
+        r = self.engine.evaluate(ToolCallRequest(tool_name="web_search", call_depth=3))
+        assert r.decision == PolicyDecision.DENY
+        assert "depth" in r.reason.lower()
+        assert r.matched_rule == "max_call_depth=2"
+
+    def test_negative_depth_denied(self):
+        r = self.engine.evaluate(ToolCallRequest(tool_name="web_search", call_depth=-1))
+        assert r.decision == PolicyDecision.DENY
+        assert r.matched_rule == "invalid_call_depth"
+
+    def test_non_integer_depth_denied(self):
+        r = self.engine.evaluate(ToolCallRequest(tool_name="web_search", call_depth="2"))  # type: ignore[arg-type]
+        assert r.decision == PolicyDecision.DENY
+        assert r.matched_rule == "invalid_call_depth"
+
+
+# ===========================================================================
 # Required arguments
 # ===========================================================================
 

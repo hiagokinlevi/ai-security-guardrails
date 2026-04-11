@@ -33,7 +33,7 @@ Priorities may shift based on community feedback and emerging threat landscape.
 
 - [ ] Tool call interceptor for OpenAI function calling
 - [ ] Tool allow-list and deny-list enforcement with structured reasons
-- [ ] Maximum tool call depth per agent turn
+- [x] Maximum tool call depth per agent turn
 - [ ] Sandboxed tool execution result validation
 - [ ] Agent loop detection (infinite tool call cycles)
 

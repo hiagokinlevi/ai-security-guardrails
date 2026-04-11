@@ -68,6 +68,7 @@ class ToolPolicy:
     Attributes:
         tool_name:              Tool identifier (must match ToolCallRequest.tool_name).
         allowed:                Whether the tool is permitted at all (default True).
+        max_call_depth:         Maximum allowed nested tool-call depth (None = unlimited).
         rate_limit:             Maximum number of calls allowed per session (None = unlimited).
         required_args:          Argument names that must be present.
         blocked_arg_patterns:   Per-argument regex patterns that block the call if matched.
@@ -80,6 +81,7 @@ class ToolPolicy:
     """
     tool_name:              str
     allowed:                bool = True
+    max_call_depth:         Optional[int] = None
     rate_limit:             Optional[int] = None
     required_args:          list[str] = field(default_factory=list)
     blocked_arg_patterns:   dict[str, list[str]] = field(default_factory=dict)
@@ -99,11 +101,13 @@ class ToolCallRequest:
         arguments:   Dict of argument name → value.
         session_id:  Optional session identifier for rate limiting.
         request_id:  Optional unique ID for this call (for audit correlation).
+        call_depth:  Nested tool-call depth for the current agent turn (0-indexed).
     """
     tool_name:  str
     arguments:  dict[str, Any] = field(default_factory=dict)
     session_id: str = "default"
     request_id: str = ""
+    call_depth: int = 0
 
 
 @dataclass
@@ -165,11 +169,12 @@ class ToolPolicyEngine:
     Evaluation order:
       1. Check if the tool is on the allowlist (has a policy with allowed=True).
          If no policy exists, the tool is DENIED by default (deny-by-default posture).
-      2. Check rate limit for the session.
-      3. Check required arguments are present.
-      4. Check argument length limits.
-      5. Check blocked argument patterns (deny if any pattern matches).
-      6. Check redact patterns (redact matching values in logs, but ALLOW).
+      2. Check call depth metadata and enforce nested depth limits.
+      3. Check rate limit for the session.
+      4. Check required arguments are present.
+      5. Check argument length limits.
+      6. Check blocked argument patterns (deny if any pattern matches).
+      7. Check redact patterns (redact matching values in logs, but ALLOW).
 
     Args:
         policies:          List of ToolPolicy objects.
@@ -257,6 +262,32 @@ class ToolPolicyEngine:
                 reason=policy.deny_reason,
                 sanitized_args=dict(request.arguments),
                 matched_rule=f"policy.allowed=False for '{tool}'",
+            )
+            self._audit_result(request, result)
+            return result
+
+        # Step 2: Call depth validation and enforcement
+        if not isinstance(request.call_depth, int) or request.call_depth < 0:
+            result = ToolPolicyResult(
+                decision=PolicyDecision.DENY,
+                tool_name=tool,
+                reason="Tool call depth must be a non-negative integer",
+                sanitized_args=dict(request.arguments),
+                matched_rule="invalid_call_depth",
+            )
+            self._audit_result(request, result)
+            return result
+
+        if policy.max_call_depth is not None and request.call_depth > policy.max_call_depth:
+            result = ToolPolicyResult(
+                decision=PolicyDecision.DENY,
+                tool_name=tool,
+                reason=(
+                    f"Tool call depth exceeded for '{tool}': "
+                    f"{request.call_depth} > {policy.max_call_depth}"
+                ),
+                sanitized_args=dict(request.arguments),
+                matched_rule=f"max_call_depth={policy.max_call_depth}",
             )
             self._audit_result(request, result)
             return result

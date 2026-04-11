@@ -158,6 +158,32 @@ k1n-guardrails validate-input \
 Rules are loaded from YAML, compiled locally, and contribute their configured flag and risk score to
 the same input validation result.
 
+### Agent tool policy
+
+Agent integrations can apply least-privilege tool controls before a nested tool call executes:
+
+```python
+from guardrails.policy_engine.tool_policy import ToolCallRequest, ToolPolicy, ToolPolicyEngine
+
+engine = ToolPolicyEngine(
+    policies=[
+        ToolPolicy(
+            tool_name="web_search",
+            allowed=True,
+            max_call_depth=2,
+            required_args=["query"],
+        )
+    ]
+)
+
+result = engine.evaluate(
+    ToolCallRequest(tool_name="web_search", arguments={"query": "latest advisories"}, call_depth=1)
+)
+```
+
+The policy engine denies unregistered tools by default and can now stop over-depth nested tool
+chains before they execute.
+
 ### FastAPI integration
 
 ```python
@@ -182,6 +208,7 @@ async def chat(request: ChatRequest):
 | `guardrails/input_controls/validator.py` | Validates and risk-scores user inputs |
 | `guardrails/cli.py` | Offline JSON CLI for input validation and injection scanning |
 | `guardrails/policy_engine/regex_rules.py` | YAML-backed custom regex rule loading |
+| `guardrails/policy_engine/tool_policy.py` | Enforces allow-list, argument, rate, and call-depth limits for agent tools |
 | `guardrails/output_controls/filter.py` | Detects and redacts sensitive data in model outputs |
 | `guardrails/redaction/redactor.py` | PII and secret redaction engine |
 | `guardrails/policy_engine/engine.py` | YAML-based policy evaluation |
