@@ -15,9 +15,9 @@ Usage:
     )
 
 How it works:
-    1. On each request, the middleware checks for an "x-guardrails-skip"
-       header. Requests with this header bypass guardrails (useful for
-       internal health-check endpoints). Only use this for non-LLM routes.
+    1. On each request, the middleware can optionally check for an
+       "x-guardrails-skip" header. Guardrails are bypassed only when the
+       middleware is configured with a shared secret and the header matches it.
     2. For routes matching the monitored path prefix (/chat by default),
        the middleware reads the request body, validates the input, and
        either blocks the request or allows it to proceed.
@@ -34,6 +34,7 @@ Limitations:
 
 from __future__ import annotations
 
+import hmac
 import json
 import time
 from typing import Awaitable, Callable, Optional
@@ -62,11 +63,13 @@ class GuardrailsMiddleware(BaseHTTPMiddleware):
         monitored_prefix: str = "/chat",  # Only inspect requests under this path
         log_inputs: bool = False,
         log_outputs: bool = False,
+        skip_header_secret: str | None = None,
     ) -> None:
         super().__init__(app)
         # Load the policy — fail fast if the file is missing or invalid
         self._engine = PolicyEngine.from_file(policy_path)
         self._monitored_prefix = monitored_prefix
+        self._skip_header_secret = skip_header_secret
         self._audit = AuditLogger(
             log_inputs=log_inputs,
             log_outputs=log_outputs,
@@ -89,8 +92,13 @@ class GuardrailsMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith(self._monitored_prefix):
             return await call_next(request)
 
-        # Allow explicit bypass via header (for internal/trusted callers only)
-        if request.headers.get("x-guardrails-skip") == "true":
+        # Allow explicit bypass only when a trusted shared secret is configured.
+        skip_header = request.headers.get("x-guardrails-skip")
+        if (
+            self._skip_header_secret is not None
+            and skip_header is not None
+            and hmac.compare_digest(skip_header, self._skip_header_secret)
+        ):
             return await call_next(request)
 
         request_id = generate_request_id()
