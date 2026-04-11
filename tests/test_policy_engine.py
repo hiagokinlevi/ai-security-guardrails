@@ -92,6 +92,54 @@ class TestLoadPolicy:
             with pytest.raises(ValueError, match="required field"):
                 load_policy(path)
 
+    def test_empty_yaml_raises_clear_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_policy.yaml"
+            path.write_text("", encoding="utf-8")
+            with pytest.raises(ValueError, match="top level must be a mapping"):
+                load_policy(path)
+
+    def test_non_mapping_section_raises(self) -> None:
+        bad_policy = {
+            "name": "test",
+            "version": "1.0",
+            "input": ["not", "a", "mapping"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="section 'input' must be a mapping"):
+                load_policy(path)
+
+    def test_out_of_range_threshold_raises(self) -> None:
+        bad_policy = {
+            **DEFAULT_POLICY_DICT,
+            "input": {**DEFAULT_POLICY_DICT["input"], "risk_threshold": 1.5},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="risk_threshold.*<= 1.0"):
+                load_policy(path)
+
+    def test_invalid_allowed_tools_raises(self) -> None:
+        bad_policy = {
+            **DEFAULT_POLICY_DICT,
+            "tools": {**DEFAULT_POLICY_DICT["tools"], "allowed_tools": ["search_kb", ""]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="allowed_tools.*non-empty strings"):
+                load_policy(path)
+
+    def test_invalid_action_raises(self) -> None:
+        bad_policy = {
+            **DEFAULT_POLICY_DICT,
+            "input": {**DEFAULT_POLICY_DICT["input"], "on_injection_signal": "page_someone"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="Unknown policy action"):
+                load_policy(path)
+
     def test_defaults_applied_for_missing_optional_fields(self) -> None:
         minimal_policy = {"name": "minimal", "version": "0.1"}
         with tempfile.TemporaryDirectory() as tmp:

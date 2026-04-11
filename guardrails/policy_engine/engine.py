@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import yaml
 
@@ -97,6 +97,64 @@ def _action_from_string(value: str) -> PolicyAction:
     return action
 
 
+def _ensure_mapping(value: Any, context: str) -> dict[str, Any]:
+    """Require a YAML object to deserialize into a mapping."""
+    if not isinstance(value, dict):
+        raise ValueError(f"Policy {context} must be a mapping.")
+    return value
+
+
+_NumberT = TypeVar("_NumberT", int, float)
+
+
+def _get_typed_value(
+    section: dict[str, Any],
+    key: str,
+    default: _NumberT | bool | str | list[str],
+    expected_type: type[_NumberT] | type[bool] | type[str] | tuple[type[Any], ...],
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> _NumberT | bool | str | list[str]:
+    """Read and validate a typed scalar from a policy section."""
+    value = section.get(key, default)
+    if isinstance(expected_type, tuple):
+        if not isinstance(value, expected_type):
+            expected_names = ", ".join(t.__name__ for t in expected_type)
+            raise ValueError(f"Policy field '{key}' must be of type {expected_names}.")
+    elif not isinstance(value, expected_type):
+        raise ValueError(f"Policy field '{key}' must be of type {expected_type.__name__}.")
+
+    if isinstance(value, bool) and expected_type in (int, float):
+        raise ValueError(f"Policy field '{key}' must be numeric, not boolean.")
+
+    if isinstance(value, (int, float)):
+        numeric_value = float(value)
+        if minimum is not None and numeric_value < minimum:
+            raise ValueError(f"Policy field '{key}' must be >= {minimum}.")
+        if maximum is not None and numeric_value > maximum:
+            raise ValueError(f"Policy field '{key}' must be <= {maximum}.")
+
+    return value
+
+
+def _get_action(section: dict[str, Any], key: str, default: str) -> str:
+    """Validate that a configured action is known before storing it."""
+    action = _get_typed_value(section, key, default, str)
+    _action_from_string(action)
+    return action
+
+
+def _get_allowed_tools(section: dict[str, Any]) -> list[str]:
+    """Validate the optional tool allowlist."""
+    allowed_tools = section.get("allowed_tools", [])
+    if not isinstance(allowed_tools, list):
+        raise ValueError("Policy field 'allowed_tools' must be a list of strings.")
+    if any(not isinstance(tool, str) or not tool.strip() for tool in allowed_tools):
+        raise ValueError("Policy field 'allowed_tools' must contain only non-empty strings.")
+    return allowed_tools
+
+
 def load_policy(policy_path: str | Path) -> PolicyConfig:
     """
     Load and parse a YAML policy file into a PolicyConfig object.
@@ -115,44 +173,52 @@ def load_policy(policy_path: str | Path) -> PolicyConfig:
     if not path.exists():
         raise FileNotFoundError(f"Policy file not found: {path}")
 
-    with path.open("r") as f:
-        raw: dict[str, Any] = yaml.safe_load(f)
+    with path.open("r", encoding="utf-8") as f:
+        raw = _ensure_mapping(yaml.safe_load(f), "top level")
 
     # Validate required top-level fields
     for required_field in ("name", "version"):
         if required_field not in raw:
             raise ValueError(f"Policy file missing required field: '{required_field}'")
 
-    input_cfg = raw.get("input", {})
-    output_cfg = raw.get("output", {})
-    audit_cfg = raw.get("audit", {})
-    tools_cfg = raw.get("tools", {})
+    input_cfg = _ensure_mapping(raw.get("input", {}), "section 'input'")
+    output_cfg = _ensure_mapping(raw.get("output", {}), "section 'output'")
+    audit_cfg = _ensure_mapping(raw.get("audit", {}), "section 'audit'")
+    tools_cfg = _ensure_mapping(raw.get("tools", {}), "section 'tools'")
 
     return PolicyConfig(
         name=raw["name"],
         version=str(raw["version"]),
         description=raw.get("description", ""),
         # Input
-        input_max_length=input_cfg.get("max_length", 10000),
-        input_risk_threshold=input_cfg.get("risk_threshold", 0.7),
-        on_injection_signal=input_cfg.get("on_injection_signal", "send_to_review"),
-        on_sensitive_data=input_cfg.get("on_sensitive_data", "allow_with_warning"),
-        on_block=input_cfg.get("on_block", "return_safe_error_message"),
+        input_max_length=_get_typed_value(input_cfg, "max_length", 10000, int, minimum=1),
+        input_risk_threshold=_get_typed_value(
+            input_cfg, "risk_threshold", 0.7, (int, float), minimum=0.0, maximum=1.0
+        ),
+        on_injection_signal=_get_action(input_cfg, "on_injection_signal", "send_to_review"),
+        on_sensitive_data=_get_action(input_cfg, "on_sensitive_data", "allow_with_warning"),
+        on_block=_get_action(input_cfg, "on_block", "return_safe_error_message"),
         # Output
-        output_risk_threshold=output_cfg.get("risk_threshold", 0.8),
-        redact_pii=output_cfg.get("redact_pii", True),
-        on_high_risk_output=output_cfg.get("on_high_risk", "send_to_review"),
-        on_credential_detected=output_cfg.get("on_credential_detected", "redact_and_warn"),
+        output_risk_threshold=_get_typed_value(
+            output_cfg, "risk_threshold", 0.8, (int, float), minimum=0.0, maximum=1.0
+        ),
+        redact_pii=_get_typed_value(output_cfg, "redact_pii", True, bool),
+        on_high_risk_output=_get_action(output_cfg, "on_high_risk", "send_to_review"),
+        on_credential_detected=_get_action(
+            output_cfg, "on_credential_detected", "redact_and_warn"
+        ),
         # Audit
-        audit_enabled=audit_cfg.get("enabled", True),
-        log_inputs=audit_cfg.get("log_inputs", False),
-        log_outputs=audit_cfg.get("log_outputs", False),
-        log_decisions=audit_cfg.get("log_decisions", True),
-        log_risk_scores=audit_cfg.get("log_risk_scores", True),
+        audit_enabled=_get_typed_value(audit_cfg, "enabled", True, bool),
+        log_inputs=_get_typed_value(audit_cfg, "log_inputs", False, bool),
+        log_outputs=_get_typed_value(audit_cfg, "log_outputs", False, bool),
+        log_decisions=_get_typed_value(audit_cfg, "log_decisions", True, bool),
+        log_risk_scores=_get_typed_value(audit_cfg, "log_risk_scores", True, bool),
         # Tools
-        tool_approval_required=tools_cfg.get("approval_required", True),
-        allowed_tools=tools_cfg.get("allowed_tools", []),
-        max_tool_calls_per_turn=tools_cfg.get("max_tool_calls_per_turn", 5),
+        tool_approval_required=_get_typed_value(tools_cfg, "approval_required", True, bool),
+        allowed_tools=_get_allowed_tools(tools_cfg),
+        max_tool_calls_per_turn=_get_typed_value(
+            tools_cfg, "max_tool_calls_per_turn", 5, int, minimum=1
+        ),
     )
 
 
