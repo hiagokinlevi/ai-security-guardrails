@@ -59,6 +59,9 @@ _OUTPUT_RISK_PATTERNS: list[tuple[str, str, float]] = [
     # Private key material — critical, should always block
     (r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----", "private_key_in_output", 0.9),
 
+    # Low-level control characters can poison terminals, logs, or downstream parsers.
+    (r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "control_character_in_output", 0.8),
+
     # AWS credentials
     (r"\bAKIA[0-9A-Z]{16}\b", "aws_access_key_in_output", 0.8),
     (r"aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*\S+", "aws_secret_in_output", 0.9),

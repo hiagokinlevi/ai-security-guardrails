@@ -13,6 +13,13 @@ class TestFilterOutput:
         assert "bearer_token_in_output" in result.risk_flags
         assert token not in result.filtered_output
 
+    def test_blocks_terminal_escape_sequences(self) -> None:
+        output = "status:\x1b[31mFAIL\x1b[0m"
+        result = filter_output(output)
+        assert result.decision == OutputDecision.BLOCK
+        assert "control_character_in_output" in result.risk_flags
+        assert output not in result.filtered_output
+
     def test_short_bearer_header_is_not_flagged_as_secret(self) -> None:
         result = filter_output("Authorization: Bearer short-token")
         assert result.decision == OutputDecision.PASS
