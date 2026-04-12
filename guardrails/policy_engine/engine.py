@@ -14,7 +14,6 @@ Policy YAML schema:
 
 from __future__ import annotations
 
-import math
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -135,8 +134,6 @@ def _get_typed_value(
 
     if isinstance(value, (int, float)):
         numeric_value = float(value)
-        if not math.isfinite(numeric_value):
-            raise ValueError(f"Policy field '{key}' must be a finite number.")
         if minimum is not None and numeric_value < minimum:
             raise ValueError(f"Policy field '{key}' must be >= {minimum}.")
         if maximum is not None and numeric_value > maximum:

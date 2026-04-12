@@ -34,46 +34,6 @@ class RegexRule:
     description: str = ""
 
 
-def _require_string(value: object, field_name: str, *, rule_ref: str) -> str:
-    """Validate required string fields without coercing other YAML types."""
-    if not isinstance(value, str):
-        raise ValueError(f"Regex rule '{rule_ref}' field '{field_name}' must be a string.")
-    text = value.strip()
-    if not text:
-        raise ValueError(f"Regex rule '{rule_ref}' field '{field_name}' cannot be empty.")
-    return text
-
-
-def _get_category(raw_rule: dict[object, object], *, rule_ref: str) -> str:
-    """Return a supported rule category or raise a clear schema error."""
-    raw_category = raw_rule.get("category", "policy")
-    if not isinstance(raw_category, str):
-        raise ValueError(f"Regex rule '{rule_ref}' field 'category' must be a string.")
-    category = raw_category.strip() or "policy"
-    if category not in _DEFAULT_CATEGORY_SCORES:
-        allowed = ", ".join(sorted(_DEFAULT_CATEGORY_SCORES))
-        raise ValueError(
-            f"Regex rule '{rule_ref}' category must be one of: {allowed}."
-        )
-    return category
-
-
-def _get_score(
-    raw_rule: dict[object, object],
-    *,
-    rule_ref: str,
-    default_score: float,
-) -> float:
-    """Validate numeric rule scores and reject YAML booleans."""
-    raw_score = raw_rule.get("score", default_score)
-    if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
-        raise ValueError(f"Regex rule '{rule_ref}' field 'score' must be numeric.")
-    score = float(raw_score)
-    if score <= 0 or score > 1:
-        raise ValueError(f"Regex rule '{rule_ref}' score must be > 0 and <= 1.")
-    return score
-
-
 def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
     """
     Load a YAML regex rule set.
@@ -108,31 +68,23 @@ def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
         if not isinstance(raw_rule, dict):
             raise ValueError(f"Regex rule #{index} must be a mapping.")
 
-        raw_id = raw_rule.get("id")
-        raw_name = raw_rule.get("name")
-        if raw_id is None and raw_name is None:
-            raise ValueError(f"Regex rule #{index} is missing 'id'.")
-        rule_id = _require_string(
-            raw_id if raw_id is not None else raw_name,
-            "id",
-            rule_ref=f"#{index}",
-        )
-        flag = _require_string(raw_rule.get("flag"), "flag", rule_ref=rule_id)
-        category = _get_category(raw_rule, rule_ref=rule_id)
-        pattern_text = _require_string(
-            raw_rule.get("pattern"),
-            "pattern",
-            rule_ref=rule_id,
-        )
-        raw_description = raw_rule.get("description", "")
-        if not isinstance(raw_description, str):
-            raise ValueError(
-                f"Regex rule '{rule_id}' field 'description' must be a string."
-            )
-        description = raw_description
+        rule_id = str(raw_rule.get("id") or raw_rule.get("name") or "").strip()
+        flag = str(raw_rule.get("flag") or "").strip()
+        category = str(raw_rule.get("category") or "policy").strip()
+        pattern_text = str(raw_rule.get("pattern") or "")
+        description = str(raw_rule.get("description") or "")
 
-        default_score = _DEFAULT_CATEGORY_SCORES[category]
-        score = _get_score(raw_rule, rule_ref=rule_id, default_score=default_score)
+        if not rule_id:
+            raise ValueError(f"Regex rule #{index} is missing 'id'.")
+        if not flag:
+            raise ValueError(f"Regex rule '{rule_id}' is missing 'flag'.")
+        if not pattern_text:
+            raise ValueError(f"Regex rule '{rule_id}' is missing 'pattern'.")
+
+        default_score = _DEFAULT_CATEGORY_SCORES.get(category, 0.2)
+        score = float(raw_rule.get("score", default_score))
+        if score <= 0 or score > 1:
+            raise ValueError(f"Regex rule '{rule_id}' score must be > 0 and <= 1.")
 
         try:
             pattern = re.compile(pattern_text, re.IGNORECASE)
