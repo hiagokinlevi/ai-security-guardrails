@@ -130,6 +130,17 @@ class TestLoadPolicy:
             with pytest.raises(ValueError, match="risk_threshold.*numeric, not boolean"):
                 load_policy(path)
 
+    @pytest.mark.parametrize("threshold", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_threshold_raises(self, threshold: float) -> None:
+        bad_policy = {
+            **DEFAULT_POLICY_DICT,
+            "input": {**DEFAULT_POLICY_DICT["input"], "risk_threshold": threshold},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_policy_file(bad_policy, tmp)
+            with pytest.raises(ValueError, match="risk_threshold.*finite number"):
+                load_policy(path)
+
     def test_invalid_allowed_tools_raises(self) -> None:
         bad_policy = {
             **DEFAULT_POLICY_DICT,
