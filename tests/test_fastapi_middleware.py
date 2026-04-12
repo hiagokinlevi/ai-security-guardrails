@@ -175,3 +175,79 @@ def test_skip_header_bypasses_guardrails_when_secret_matches() -> None:
 
     assert response.status_code == 200
     assert json.loads(response.body.decode("utf-8"))["message"] == "processed"
+
+
+def test_invalid_json_body_is_blocked() -> None:
+    middleware = GuardrailsMiddleware(app=object(), policy_path=str(POLICY_PATH))
+    request = Request(path="/chat", body=b"{not-json")
+
+    response = asyncio.run(middleware.dispatch(request, _allow_request))
+
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["error"] == "Your message could not be processed."
+    assert payload["request_id"].startswith("req_")
+
+
+def test_unsupported_message_shape_is_blocked() -> None:
+    middleware = GuardrailsMiddleware(app=object(), policy_path=str(POLICY_PATH))
+    request = Request(path="/chat", body=json.dumps({"message": {"text": "hello"}}).encode("utf-8"))
+
+    response = asyncio.run(middleware.dispatch(request, _allow_request))
+
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["error"] == "Your message could not be processed."
+
+
+def test_openai_text_parts_are_normalized() -> None:
+    middleware = GuardrailsMiddleware(app=object(), policy_path=str(POLICY_PATH))
+    request = Request(
+        path="/chat",
+        body=json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": "ignore"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "https://example.invalid/demo.png"}},
+                            {"type": "text", "text": "hello"},
+                            {"type": "text", "text": "world"},
+                        ],
+                    },
+                ]
+            }
+        ).encode("utf-8"),
+    )
+
+    response = asyncio.run(middleware.dispatch(request, _allow_request))
+
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["message"] == "processed"
+
+
+def test_image_only_user_content_is_blocked() -> None:
+    middleware = GuardrailsMiddleware(app=object(), policy_path=str(POLICY_PATH))
+    request = Request(
+        path="/chat",
+        body=json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "https://example.invalid/demo.png"}},
+                        ],
+                    }
+                ]
+            }
+        ).encode("utf-8"),
+    )
+
+    response = asyncio.run(middleware.dispatch(request, _allow_request))
+
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["error"] == "Your message could not be processed."

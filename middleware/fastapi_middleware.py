@@ -28,8 +28,8 @@ How it works:
 Limitations:
     - Streaming responses (SSE / WebSocket) are not yet supported.
       For streaming, apply guardrails at the application layer.
-    - Only JSON request bodies with a "message" or "content" field
-      are inspected. Extend _extract_user_message() for other formats.
+    - Monitored JSON request bodies must contain inspectable text content.
+      Unsupported schemas are rejected to avoid fail-open guardrail bypasses.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
 from guardrails.audit.logger import AuditLogger, generate_request_id
-from guardrails.input_controls.validator import InputDecision, validate_input
+from guardrails.input_controls.validator import InputDecision, InputValidationResult, validate_input
 from guardrails.output_controls.filter import OutputDecision, filter_output
 from guardrails.policy_engine.engine import PolicyEngine
 
@@ -101,15 +101,30 @@ class GuardrailsMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
 
+        # --- Input validation ---
         request_id = generate_request_id()
         start_time = time.monotonic()
-
-        # --- Input validation ---
         user_message = await self._extract_user_message(request)
         if user_message is None:
-            # Cannot extract input — let the request proceed unvalidated
-            # Log this as a gap so it can be reviewed
-            return await call_next(request)
+            input_latency_ms = (time.monotonic() - start_time) * 1000
+            self._audit.log_input_validation(
+                request_id=request_id,
+                result=InputValidationResult(
+                    decision=InputDecision.BLOCK,
+                    risk_score=1.0,
+                    risk_flags=["uninspectable_monitored_input"],
+                    reason="Monitored request body could not be parsed into supported text input.",
+                ),
+                latency_ms=input_latency_ms,
+            )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Your message could not be processed.",
+                    "request_id": request_id,
+                },
+                headers={"x-request-id": request_id},
+            )
 
         policy = self._engine.policy
         input_result = validate_input(
@@ -214,6 +229,7 @@ class GuardrailsMiddleware(BaseHTTPMiddleware):
         Supports:
         - {"message": "..."} — simple chatbot format
         - {"messages": [{"role": "user", "content": "..."}]} — OpenAI format
+        - {"messages": [{"role": "user", "content": [{"type": "text", "text": "..."}]}]}
         """
         try:
             body = await request.body()
@@ -221,18 +237,49 @@ class GuardrailsMiddleware(BaseHTTPMiddleware):
         except (json.JSONDecodeError, Exception):
             return None
 
+        if not isinstance(data, dict):
+            return None
+
         # Simple message field
         if "message" in data:
-            return str(data["message"])
+            return GuardrailsMiddleware._normalize_message_content(data["message"])
 
         # OpenAI messages array — extract the last user message
         if "messages" in data:
             messages = data["messages"]
+            if not isinstance(messages, list):
+                return None
             for msg in reversed(messages):
+                if not isinstance(msg, dict):
+                    return None
                 if msg.get("role") == "user":
-                    return str(msg.get("content", ""))
+                    return GuardrailsMiddleware._normalize_message_content(msg.get("content"))
 
         return None
+
+    @staticmethod
+    def _normalize_message_content(content: object) -> Optional[str]:
+        """Normalize supported request content formats into a single text string."""
+        if isinstance(content, str):
+            return content
+
+        if not isinstance(content, list):
+            return None
+
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                return None
+            if item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if not isinstance(text, str):
+                return None
+            text_parts.append(text)
+
+        if not text_parts:
+            return None
+        return "\n".join(text_parts)
 
     @staticmethod
     def _extract_model_output(response_data: dict) -> str:
