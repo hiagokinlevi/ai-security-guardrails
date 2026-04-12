@@ -68,3 +68,49 @@ rules:
     with pytest.raises(ValueError, match="invalid pattern"):
         load_regex_rules(path)
 
+
+def test_boolean_yaml_regex_rule_score_raises_value_error(tmp_path: Path) -> None:
+    path = _write_rule_set(
+        tmp_path,
+        """
+rules:
+  - id: bool-score
+    flag: bool_score
+    pattern: "secret"
+    score: true
+""",
+    )
+
+    with pytest.raises(ValueError, match="field 'score' must be numeric"):
+        load_regex_rules(path)
+
+
+def test_non_string_yaml_regex_rule_pattern_raises_value_error(tmp_path: Path) -> None:
+    path = _write_rule_set(
+        tmp_path,
+        """
+rules:
+  - id: numeric-pattern
+    flag: numeric_pattern
+    pattern: 123
+""",
+    )
+
+    with pytest.raises(ValueError, match="field 'pattern' must be a string"):
+        load_regex_rules(path)
+
+
+def test_unknown_yaml_regex_rule_category_raises_value_error(tmp_path: Path) -> None:
+    path = _write_rule_set(
+        tmp_path,
+        """
+rules:
+  - id: odd-category
+    flag: odd_category
+    category: unknown
+    pattern: "secret"
+""",
+    )
+
+    with pytest.raises(ValueError, match="category must be one of"):
+        load_regex_rules(path)
