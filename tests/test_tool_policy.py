@@ -241,6 +241,34 @@ class TestRequiredArgs:
         assert r.decision == PolicyDecision.DENY
         assert "lang" in r.reason
 
+    def test_none_required_arg_denied(self):
+        r = self.engine.evaluate(
+            ToolCallRequest(tool_name="query", arguments={"q": None, "lang": "en"})
+        )
+        assert r.decision == PolicyDecision.DENY
+        assert "q" in r.reason
+
+    def test_blank_required_arg_denied(self):
+        r = self.engine.evaluate(
+            ToolCallRequest(tool_name="query", arguments={"q": "   ", "lang": "en"})
+        )
+        assert r.decision == PolicyDecision.DENY
+        assert "q" in r.reason
+
+    def test_empty_collection_required_arg_denied(self):
+        r = self.engine.evaluate(
+            ToolCallRequest(tool_name="query", arguments={"q": [], "lang": "en"})
+        )
+        assert r.decision == PolicyDecision.DENY
+        assert "q" in r.reason
+
+    @pytest.mark.parametrize("value", [0, False])
+    def test_legitimate_falsy_required_arg_allowed(self, value: object):
+        r = self.engine.evaluate(
+            ToolCallRequest(tool_name="query", arguments={"q": value, "lang": "en"})
+        )
+        assert r.decision == PolicyDecision.ALLOW
+
 
 # ===========================================================================
 # Argument length

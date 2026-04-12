@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -70,7 +71,7 @@ class ToolPolicy:
         allowed:                Whether the tool is permitted at all (default True).
         max_call_depth:         Maximum allowed nested tool-call depth (None = unlimited).
         rate_limit:             Maximum number of calls allowed per session (None = unlimited).
-        required_args:          Argument names that must be present.
+        required_args:          Argument names that must be present with a non-empty value.
         blocked_arg_patterns:   Per-argument regex patterns that block the call if matched.
                                 Format: {"arg_name": ["pattern1", "pattern2"]}
         redact_arg_patterns:    Per-argument regex patterns for log redaction only.
@@ -171,7 +172,7 @@ class ToolPolicyEngine:
          If no policy exists, the tool is DENIED by default (deny-by-default posture).
       2. Check call depth metadata and enforce nested depth limits.
       3. Check rate limit for the session.
-      4. Check required arguments are present.
+      4. Check required arguments are present and non-empty.
       5. Check argument length limits.
       6. Check blocked argument patterns (deny if any pattern matches).
       7. Check redact patterns (redact matching values in logs, but ALLOW).
@@ -220,6 +221,19 @@ class ToolPolicyEngine:
     # ------------------------------------------------------------------
     # Evaluation
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _required_arg_is_missing(value: Any) -> bool:
+        """Treat blank strings and empty containers as missing required arguments."""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        if isinstance(value, (bytes, bytearray)):
+            return len(value) == 0
+        if isinstance(value, Collection) and not isinstance(value, (str, bytes, bytearray)):
+            return len(value) == 0
+        return False
 
     def evaluate(self, request: ToolCallRequest) -> ToolPolicyResult:
         """
@@ -311,12 +325,16 @@ class ToolPolicyEngine:
                 return result
 
         # Step 4: Required arguments check
-        missing = [a for a in policy.required_args if a not in request.arguments]
+        missing = [
+            arg
+            for arg in policy.required_args
+            if arg not in request.arguments or self._required_arg_is_missing(request.arguments[arg])
+        ]
         if missing:
             result = ToolPolicyResult(
                 decision=PolicyDecision.DENY,
                 tool_name=tool,
-                reason=f"Required argument(s) missing: {missing}",
+                reason=f"Required argument(s) missing or empty: {missing}",
                 sanitized_args=dict(request.arguments),
                 matched_rule=f"required_args={policy.required_args}",
             )
