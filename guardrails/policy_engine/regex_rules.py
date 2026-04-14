@@ -34,7 +34,13 @@ class RegexRule:
     description: str = ""
 
 
-def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
+def load_regex_rules(
+    rule_set_path: str | Path,
+    *,
+    max_bytes: int = 256_000,
+    max_rules: int = 500,
+    max_pattern_length: int = 2048,
+) -> list[RegexRule]:
     """
     Load a YAML regex rule set.
 
@@ -53,6 +59,19 @@ def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
     if not path.exists():
         raise FileNotFoundError(f"Regex rule set not found: {path}")
 
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0.")
+    if max_rules <= 0:
+        raise ValueError("max_rules must be > 0.")
+    if max_pattern_length <= 0:
+        raise ValueError("max_pattern_length must be > 0.")
+
+    size_bytes = path.stat().st_size
+    if size_bytes > max_bytes:
+        raise ValueError(
+            f"Regex rule set file is too large ({size_bytes} bytes; max {max_bytes})."
+        )
+
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
 
@@ -62,6 +81,10 @@ def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
     raw_rules = raw.get("rules", [])
     if not isinstance(raw_rules, list):
         raise ValueError("Regex rule set field 'rules' must be a list.")
+    if len(raw_rules) > max_rules:
+        raise ValueError(
+            f"Regex rule set has too many rules ({len(raw_rules)}; max {max_rules})."
+        )
 
     rules: list[RegexRule] = []
     for index, raw_rule in enumerate(raw_rules, start=1):
@@ -80,6 +103,11 @@ def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
             raise ValueError(f"Regex rule '{rule_id}' is missing 'flag'.")
         if not pattern_text:
             raise ValueError(f"Regex rule '{rule_id}' is missing 'pattern'.")
+        if len(pattern_text) > max_pattern_length:
+            raise ValueError(
+                f"Regex rule '{rule_id}' pattern is too long ({len(pattern_text)}; "
+                f"max {max_pattern_length})."
+            )
 
         default_score = _DEFAULT_CATEGORY_SCORES.get(category, 0.2)
         score = float(raw_rule.get("score", default_score))
@@ -103,4 +131,3 @@ def load_regex_rules(rule_set_path: str | Path) -> list[RegexRule]:
         )
 
     return rules
-

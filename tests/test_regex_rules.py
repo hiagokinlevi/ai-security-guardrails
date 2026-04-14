@@ -68,3 +68,30 @@ rules:
     with pytest.raises(ValueError, match="invalid pattern"):
         load_regex_rules(path)
 
+
+def test_yaml_regex_rule_set_too_large_is_rejected(tmp_path: Path) -> None:
+    # Ensure the size check happens before YAML parsing.
+    path = _write_rule_set(
+        tmp_path,
+        "rules:\n  - id: big\n    flag: big\n    pattern: \"" + ("a" * 5000) + "\"\n",
+    )
+
+    with pytest.raises(ValueError, match="too large"):
+        load_regex_rules(path, max_bytes=100)
+
+
+def test_yaml_regex_rule_pattern_too_long_is_rejected(tmp_path: Path) -> None:
+    path = _write_rule_set(
+        tmp_path,
+        """
+rules:
+  - id: too-long-pattern
+    flag: too_long_pattern
+    pattern: "REPLACE_ME"
+""",
+    )
+    content = path.read_text()
+    path.write_text(content.replace("REPLACE_ME", "a" * 3000))
+
+    with pytest.raises(ValueError, match="pattern is too long"):
+        load_regex_rules(path, max_pattern_length=1000)
