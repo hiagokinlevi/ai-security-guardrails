@@ -53,26 +53,7 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] OpenTelemetry trace integration
 - [ ] Prometheus metrics exporter (policy decisions, block rates, latency)
 - [ ] Grafana dashboard template
-- [ ] Policy version management and rollback
-- [ ] Audit log export to S3, Azure Blob, GCS
+- [ ] Policy version ma
 
----
-
-## v1.0 — Production Readiness
-
-- [ ] Full test coverage (>90%)
-- [ ] Comprehensive documentation site
-- [ ] Security audit by an external reviewer
-- [ ] Performance benchmarks and optimization
-- [ ] Stable public API with semantic versioning guarantee
-
----
-
-## Out of Scope (by design)
-
-The following will **not** be part of this library:
-
-- **User authentication / authorization** — Use your application's auth layer.
-- **Model-level fine-tuning for safety** — Use the model provider's safety features.
-- **Real-time threat intelligence feeds** — This library uses static heuristics by design to avoid
-  network dependencies in the hot path.
+## Automated Completions
+- [x] Create minimal LLM guardrails wrapper (cycle 17)
