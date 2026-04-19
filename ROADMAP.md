@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Create minimal LLM guardrails wrapper (cycle 17)
+- [x] Add tool allowlist validator for agents (cycle 18)
