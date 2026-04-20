@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add tool allowlist validator for agents (cycle 18)
+- [x] Implement RAG document sanitization helper (cycle 19)
