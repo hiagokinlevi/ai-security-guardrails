@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add unit tests for core guardrail checks (cycle 23)
+- [x] Add default guardrail policy file (cycle 24)
