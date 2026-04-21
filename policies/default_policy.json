@@ -1,0 +1,51 @@
+{
+  "policy_id": "default-guardrail-policy",
+  "version": "1.0.0",
+  "description": "Baseline security policy for general-purpose LLM apps. Blocks common prompt-injection attempts, restricts sensitive output terms, and defines an example tool allow-list.",
+  "input": {
+    "blocked_prompt_patterns": [
+      "(?i)ignore\\s+(all\\s+)?previous\\s+instructions",
+      "(?i)disregard\\s+(the\\s+)?(system|developer)\\s+prompt",
+      "(?i)reveal\\s+(your|the)\\s+(system|hidden)\\s+prompt",
+      "(?i)you\\s+are\\s+now\\s+(in\\s+)?developer\\s+mode",
+      "(?i)act\\s+as\\s+an\\s+unfiltered\\s+model",
+      "(?i)bypass\\s+(safety|security|guardrails|filters)",
+      "(?i)jailbreak",
+      "(?i)do\\s+anything\\s+now",
+      "(?i)override\\s+(all\\s+)?rules",
+      "(?i)exfiltrat(e|ion)\\s+(data|secrets|credentials)",
+      "(?i)print\\s+the\\s+full\\s+conversation\\s+history",
+      "(?i)return\\s+raw\\s+(tool|function)\\s+output",
+      "(?i)base64\\s+decode\\s+and\\s+execute",
+      "(?i)use\\s+shell\\s+command\\s+to",
+      "(?i)<\\s*script[^>]*>"
+    ]
+  },
+  "output": {
+    "restricted_terms": [
+      "api_key",
+      "access_token",
+      "refresh_token",
+      "authorization: bearer",
+      "private_key",
+      "-----BEGIN PRIVATE KEY-----",
+      "password",
+      "passwd",
+      "secret",
+      "client_secret",
+      "session_id",
+      "aws_secret_access_key",
+      "x-api-key",
+      "internal_only",
+      "confidential"
+    ]
+  },
+  "tools": {
+    "allowed_tools": [
+      "web_search",
+      "read_document",
+      "calculator",
+      "knowledge_base_query"
+    ]
+  }
+}
