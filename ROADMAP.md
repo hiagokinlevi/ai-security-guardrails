@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Create simple CLI for prompt safety scanning (cycle 22)
+- [x] Add unit tests for core guardrail checks (cycle 23)
