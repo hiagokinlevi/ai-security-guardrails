@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Provide example protected OpenAI client (cycle 21)
+- [x] Create simple CLI for prompt safety scanning (cycle 22)
