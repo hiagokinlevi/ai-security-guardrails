@@ -1,309 +1,41 @@
-"""
-FastAPI Guardrails Middleware
-==============================
-ASGI middleware that wraps all LLM-bound requests with input validation
-and output filtering.
-
-Usage:
-    from fastapi import FastAPI
-    from middleware.fastapi_middleware import GuardrailsMiddleware
-
-    app = FastAPI()
-    app.add_middleware(
-        GuardrailsMiddleware,
-        policy_path="policies/default_policy.yaml",
-    )
-
-How it works:
-    1. On each request, the middleware can optionally check for an
-       "x-guardrails-skip" header. Guardrails are bypassed only when the
-       middleware is configured with a shared secret and the header matches it.
-    2. For routes matching the monitored path prefix (/chat by default),
-       the middleware reads the request body, validates the input, and
-       either blocks the request or allows it to proceed.
-    3. After the inner handler runs, the middleware intercepts the response
-       and applies output filtering before returning it to the client.
-    4. All decisions are logged to the structured audit logger.
-
-Limitations:
-    - Streaming responses (SSE / WebSocket) are not yet supported.
-      For streaming, apply guardrails at the application layer.
-    - Monitored JSON request bodies must contain inspectable text content.
-      Unsupported schemas are rejected to avoid fail-open guardrail bypasses.
-"""
-
 from __future__ import annotations
 
-import hmac
-import json
-import time
-from typing import Awaitable, Callable, Optional
+import uuid
+from contextvars import ContextVar
+from typing import Callable
 
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
+from starlette.responses import Response
 
-from guardrails.audit.logger import AuditLogger, generate_request_id
-from guardrails.input_controls.validator import InputDecision, InputValidationResult, validate_input
-from guardrails.output_controls.filter import OutputDecision, filter_output
-from guardrails.policy_engine.engine import PolicyEngine
+# Context-local request id for downstream logging/helpers
+request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
-class GuardrailsMiddleware(BaseHTTPMiddleware):
-    """
-    Starlette/FastAPI ASGI middleware that applies security guardrails
-    to all matching routes.
-    """
+def get_request_id() -> str | None:
+    """Return current request_id from context."""
+    return request_id_ctx.get()
 
-    def __init__(
-        self,
-        app: ASGIApp,
-        policy_path: str = "policies/default_policy.yaml",
-        monitored_prefix: str = "/chat",  # Only inspect requests under this path
-        log_inputs: bool = False,
-        log_outputs: bool = False,
-        skip_header_secret: str | None = None,
-    ) -> None:
-        super().__init__(app)
-        # Load the policy — fail fast if the file is missing or invalid
-        self._engine = PolicyEngine.from_file(policy_path)
-        self._monitored_prefix = monitored_prefix
-        self._skip_header_secret = skip_header_secret
-        self._audit = AuditLogger(
-            log_inputs=log_inputs,
-            log_outputs=log_outputs,
-            log_decisions=self._engine.policy.log_decisions,
-            log_risk_scores=self._engine.policy.log_risk_scores,
-        )
 
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        """
-        Main middleware dispatch method.
+class RequestContextMiddleware(BaseHTTPMiddleware):
+    """Inject and propagate request id for each request lifecycle."""
 
-        Called for every incoming HTTP request. Routes not matching the
-        monitored prefix pass through without inspection.
-        """
-        # Skip guardrails for non-monitored routes (e.g., health checks, docs)
-        if not request.url.path.startswith(self._monitored_prefix):
-            return await call_next(request)
+    header_name = "X-Request-ID"
 
-        # Allow explicit bypass only when a trusted shared secret is configured.
-        skip_header = request.headers.get("x-guardrails-skip")
-        if (
-            self._skip_header_secret is not None
-            and skip_header is not None
-            and hmac.compare_digest(skip_header, self._skip_header_secret)
-        ):
-            return await call_next(request)
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        incoming_request_id = request.headers.get(self.header_name)
+        request_id = incoming_request_id or str(uuid.uuid4())
 
-        # --- Input validation ---
-        request_id = generate_request_id()
-        start_time = time.monotonic()
-        user_message = await self._extract_user_message(request)
-        if user_message is None:
-            input_latency_ms = (time.monotonic() - start_time) * 1000
-            self._audit.log_input_validation(
-                request_id=request_id,
-                result=InputValidationResult(
-                    decision=InputDecision.BLOCK,
-                    risk_score=1.0,
-                    risk_flags=["uninspectable_monitored_input"],
-                    reason="Monitored request body could not be parsed into supported text input.",
-                ),
-                latency_ms=input_latency_ms,
-            )
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Your message could not be processed.",
-                    "request_id": request_id,
-                },
-                headers={"x-request-id": request_id},
-            )
+        # Store in FastAPI request state for app-level consumers
+        request.state.request_id = request_id
 
-        policy = self._engine.policy
-        input_result = validate_input(
-            user_message,
-            max_length=policy.input_max_length,
-            risk_threshold=policy.input_risk_threshold,
-        )
-        policy_decision = self._engine.evaluate_input(
-            input_risk_score=input_result.risk_score,
-            flags=input_result.risk_flags,
-        )
-
-        input_latency_ms = (time.monotonic() - start_time) * 1000
-        self._audit.log_input_validation(
-            request_id=request_id,
-            result=input_result,
-            latency_ms=input_latency_ms,
-        )
-        self._audit.log_policy_decision(
-            request_id=request_id,
-            decision=policy_decision,
-            latency_ms=input_latency_ms,
-        )
-
-        # Block the request if the policy requires it
-        if input_result.decision == InputDecision.BLOCK:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Your message could not be processed.",
-                    "request_id": request_id,
-                },
-                headers={"x-request-id": request_id},
-            )
-
-        # --- Process request ---
-        response = await call_next(request)
-
-        # --- Output filtering ---
-        # Read the response body for filtering
-        # Note: this buffers the full response in memory — not suitable for large streaming responses
-        response_body = b""
-        async for chunk in response.body_iterator:
-            response_body += chunk
-
+        # Store in context var for utilities invoked deeper in stack
+        token = request_id_ctx.set(request_id)
         try:
-            response_data = json.loads(response_body)
-            model_text = self._extract_model_output(response_data)
-        except (json.JSONDecodeError, KeyError):
-            # Cannot parse the response — return it as-is
-            return Response(
-                content=response_body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
+            response = await call_next(request)
+        finally:
+            request_id_ctx.reset(token)
 
-        output_result = filter_output(
-            model_text,
-            redact_pii=policy.redact_pii,
-            risk_threshold=policy.output_risk_threshold,
-        )
-
-        output_latency_ms = (time.monotonic() - start_time) * 1000
-        self._audit.log_output_filter(
-            request_id=request_id,
-            result=output_result,
-            latency_ms=output_latency_ms,
-        )
-
-        # If output is blocked, return a safe error
-        if output_result.decision == OutputDecision.BLOCK:
-            return JSONResponse(
-                status_code=200,  # Keep 200 to avoid leaking block reason to client
-                content={
-                    "message": output_result.filtered_output,
-                    "request_id": request_id,
-                },
-                headers={"x-request-id": request_id},
-            )
-
-        # Replace model output with filtered version in response
-        self._inject_filtered_output(response_data, output_result.filtered_output)
-        filtered_body = json.dumps(response_data).encode()
-
-        return Response(
-            content=filtered_body,
-            status_code=response.status_code,
-            headers={
-                **dict(response.headers),
-                "x-request-id": request_id,
-                "content-length": str(len(filtered_body)),
-            },
-            media_type="application/json",
-        )
-
-    @staticmethod
-    async def _extract_user_message(request: Request) -> Optional[str]:
-        """
-        Extract the user's message text from the request body.
-
-        Supports:
-        - {"message": "..."} — simple chatbot format
-        - {"messages": [{"role": "user", "content": "..."}]} — OpenAI format
-        - {"messages": [{"role": "user", "content": [{"type": "text", "text": "..."}]}]}
-        """
-        try:
-            body = await request.body()
-            data = json.loads(body)
-        except (json.JSONDecodeError, Exception):
-            return None
-
-        if not isinstance(data, dict):
-            return None
-
-        # Simple message field
-        if "message" in data:
-            return GuardrailsMiddleware._normalize_message_content(data["message"])
-
-        # OpenAI messages array — extract the last user message
-        if "messages" in data:
-            messages = data["messages"]
-            if not isinstance(messages, list):
-                return None
-            for msg in reversed(messages):
-                if not isinstance(msg, dict):
-                    return None
-                if msg.get("role") == "user":
-                    return GuardrailsMiddleware._normalize_message_content(msg.get("content"))
-
-        return None
-
-    @staticmethod
-    def _normalize_message_content(content: object) -> Optional[str]:
-        """Normalize supported request content formats into a single text string."""
-        if isinstance(content, str):
-            return content
-
-        if not isinstance(content, list):
-            return None
-
-        text_parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                return None
-            if item.get("type") != "text":
-                continue
-            text = item.get("text")
-            if not isinstance(text, str):
-                return None
-            text_parts.append(text)
-
-        if not text_parts:
-            return None
-        return "\n".join(text_parts)
-
-    @staticmethod
-    def _extract_model_output(response_data: dict) -> str:
-        """
-        Extract the model's text output from the response JSON.
-
-        Supports:
-        - {"message": "..."} — simple format
-        - OpenAI chat completion format
-        """
-        if "message" in response_data:
-            return str(response_data["message"])
-
-        # OpenAI completion format
-        choices = response_data.get("choices", [])
-        if choices:
-            return str(choices[0].get("message", {}).get("content", ""))
-
-        return ""
-
-    @staticmethod
-    def _inject_filtered_output(response_data: dict, filtered_text: str) -> None:
-        """Replace the model output in the response dict with filtered text (in-place)."""
-        if "message" in response_data:
-            response_data["message"] = filtered_text
-        elif "choices" in response_data and response_data["choices"]:
-            response_data["choices"][0]["message"]["content"] = filtered_text
+        # Echo back for client/server correlation
+        response.headers[self.header_name] = request_id
+        return response
