@@ -1,122 +1,98 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import os
-import threading
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
-_EVENT_TYPE_PROMPT_INJECTION = "prompt_injection_detected"
-_EVENT_TYPE_TOOL_MISUSE = "tool_misuse_detected"
-_EVENT_TYPE_PII_REDACTED = "pii_redacted"
+def _canonicalize_event(event: dict[str, Any]) -> str:
+    """Return deterministic JSON for hashing."""
+    return json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-@dataclass(frozen=True)
-class SecurityEventLoggerConfig:
-    """Configuration for :class:`SecurityEventLogger`.
-
-    Attributes:
-        log_file: Path to JSONL log file. Each event is one JSON object per line.
-        ensure_parent_dir: Whether to create parent directories automatically.
-    """
-
-    log_file: Path = Path("security_events.jsonl")
-    ensure_parent_dir: bool = True
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class SecurityEventLogger:
-    """Structured JSONL logger for security guardrail violations.
+    """Append-only JSONL security logger with hash-chained integrity fields."""
 
-    This utility writes one compact JSON object per line to support easy ingestion by
-    log processors and SIEM pipelines.
-    """
+    def __init__(self, log_path: str | Path):
+        self.log_path = Path(log_path)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def __init__(self, config: SecurityEventLoggerConfig | None = None) -> None:
-        self._config = config or SecurityEventLoggerConfig(
-            log_file=Path(os.getenv("SECURITY_LOG_FILE", "security_events.jsonl"))
-        )
-        self._lock = threading.Lock()
+    def _last_event_hash(self) -> str:
+        if not self.log_path.exists():
+            return "0" * 64
 
-        if self._config.ensure_parent_dir:
-            self._config.log_file.parent.mkdir(parents=True, exist_ok=True)
+        last_hash = "0" * 64
+        with self.log_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                last_hash = obj.get("event_hash", "0" * 64)
+        return last_hash
 
-    def log_event(
-        self,
-        event_type: str,
-        message: str,
-        *,
-        severity: str = "warning",
-        metadata: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Log a generic security event.
-
-        Returns the event payload for optional downstream use.
-        """
-        event: dict[str, Any] = {
+    def append_event(self, event_type: str, payload: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        base_event: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
-            "severity": severity,
-            "message": message,
-            "metadata": dict(metadata or {}),
+            "payload": payload,
+            **extra,
         }
-        line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
 
-        with self._lock:
-            with self._config.log_file.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
+        prev_hash = self._last_event_hash()
+        canonical = _canonicalize_event(base_event)
+        event_hash = _sha256_hex(canonical + prev_hash)
 
-        return event
+        entry = {
+            **base_event,
+            "prev_hash": prev_hash,
+            "event_hash": event_hash,
+        }
 
-    def log_prompt_injection_detected(
-        self,
-        *,
-        message: str = "Prompt injection pattern detected.",
-        metadata: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return self.log_event(
-            _EVENT_TYPE_PROMPT_INJECTION,
-            message,
-            severity="high",
-            metadata=metadata,
-        )
+        with self.log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def log_tool_misuse(
-        self,
-        *,
-        message: str = "Tool misuse attempt detected.",
-        metadata: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return self.log_event(
-            _EVENT_TYPE_TOOL_MISUSE,
-            message,
-            severity="high",
-            metadata=metadata,
-        )
-
-    def log_pii_redacted(
-        self,
-        *,
-        message: str = "PII was detected and redacted.",
-        metadata: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return self.log_event(
-            _EVENT_TYPE_PII_REDACTED,
-            message,
-            severity="info",
-            metadata=metadata,
-        )
+        return entry
 
 
-def get_security_logger(log_file: str | Path | None = None) -> SecurityEventLogger:
-    """Factory helper for creating a security event logger.
-
-    If ``log_file`` is not provided, ``SECURITY_LOG_FILE`` env var is honored,
-    then defaults to ``security_events.jsonl``.
+def verify_log_chain(log_path: str | Path) -> tuple[bool, int | None]:
     """
-    if log_file is None:
-        return SecurityEventLogger()
+    Verify full chain integrity.
+    Returns (is_valid, first_broken_line_number_1_indexed_or_None).
+    """
+    path = Path(log_path)
+    if not path.exists():
+        return True, None
 
-    return SecurityEventLogger(SecurityEventLoggerConfig(log_file=Path(log_file)))
+    expected_prev = "0" * 64
+    with path.open("r", encoding="utf-8") as f:
+        for idx, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+
+            entry = json.loads(line)
+            prev_hash = entry.get("prev_hash")
+            event_hash = entry.get("event_hash")
+
+            if prev_hash != expected_prev:
+                return False, idx
+
+            to_hash = dict(entry)
+            to_hash.pop("prev_hash", None)
+            to_hash.pop("event_hash", None)
+
+            canonical = _canonicalize_event(to_hash)
+            recomputed = _sha256_hex(canonical + prev_hash)
+            if recomputed != event_hash:
+                return False, idx
+
+            expected_prev = event_hash
+
+    return True, None
