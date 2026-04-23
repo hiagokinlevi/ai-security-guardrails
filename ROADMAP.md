@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Introduce high-entropy secret pattern detector in output filter (cycle 29)
+- [x] Add deterministic policy decision code enum to audit events (cycle 30)
