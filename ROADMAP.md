@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Enforce fail-closed policy loading on startup (cycle 27)
+- [x] Add middleware request body size hard limit (cycle 28)
