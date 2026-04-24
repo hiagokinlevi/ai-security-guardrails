@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add audit log tamper-verification CLI command (cycle 32)
+- [x] Add canonical suspicious Unicode normalization in input scanner (cycle 33)
