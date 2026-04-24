@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add deterministic policy decision code enum to audit events (cycle 30)
+- [x] Add request-size denial audit reason code and test coverage (cycle 31)
