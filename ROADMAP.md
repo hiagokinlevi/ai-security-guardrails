@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add request-size denial audit reason code and test coverage (cycle 31)
+- [x] Add audit log tamper-verification CLI command (cycle 32)
