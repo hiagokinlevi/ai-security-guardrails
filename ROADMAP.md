@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add canonical suspicious Unicode normalization in input scanner (cycle 33)
+- [x] Add deny-by-default startup guard when default policy file is missing (cycle 34)
