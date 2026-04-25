@@ -1,39 +1,47 @@
 from __future__ import annotations
 
-import hashlib
-import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
 
+AUDIT_SCHEMA_VERSION = "1"
+
+
 class AuditEvent(BaseModel):
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     event_type: str
-    action: str
-    message: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    policy_digest: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
-def canonical_policy_digest(policy: Dict[str, Any]) -> str:
-    canonical = json.dumps(policy, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+@dataclass(frozen=True)
+class AuditConfig:
+    expected_schema_version: str = AUDIT_SCHEMA_VERSION
 
 
-def build_audit_event(
-    *,
-    event_type: str,
-    action: str,
-    message: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    policy_digest: Optional[str] = None,
-) -> AuditEvent:
-    return AuditEvent(
-        event_type=event_type,
-        action=action,
-        message=message,
-        metadata=metadata or {},
-        policy_digest=policy_digest,
-    )
+class AuditSchemaVersionMismatchError(RuntimeError):
+    pass
+
+
+class AuditLogger:
+    def __init__(self, *, config: Optional[AuditConfig] = None) -> None:
+        self.config = config or AuditConfig()
+        self._validate_schema_compatibility()
+
+    def _validate_schema_compatibility(self) -> None:
+        if self.config.expected_schema_version != AUDIT_SCHEMA_VERSION:
+            raise AuditSchemaVersionMismatchError(
+                "Audit schema version mismatch: "
+                f"configured={self.config.expected_schema_version} "
+                f"runtime={AUDIT_SCHEMA_VERSION}"
+            )
+
+    def emit(self, event_type: str, payload: Optional[Dict[str, Any]] = None) -> AuditEvent:
+        return AuditEvent(
+            event_type=event_type,
+            payload=payload or {},
+            schema_version=AUDIT_SCHEMA_VERSION,
+        )
