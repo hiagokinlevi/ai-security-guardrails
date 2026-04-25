@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add immutable policy digest to every audit event (cycle 35)
+- [x] Add strict audit log schema version field with startup compatibility check (cycle 36)
