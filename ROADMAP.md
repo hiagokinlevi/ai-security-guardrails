@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add deny-by-default startup guard when default policy file is missing (cycle 34)
+- [x] Add immutable policy digest to every audit event (cycle 35)
