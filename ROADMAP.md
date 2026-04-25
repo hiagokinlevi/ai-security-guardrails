@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add strict audit log schema version field with startup compatibility check (cycle 36)
+- [x] Add startup policy schema validator CLI command (cycle 37)
