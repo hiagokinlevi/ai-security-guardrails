@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add startup policy schema validator CLI command (cycle 37)
+- [x] Emit policy load failure audit event before fail-closed exit (cycle 38)
