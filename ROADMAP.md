@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add middleware Content-Type allowlist enforcement for LLM ingress endpoints (cycle 40)
+- [x] Add audit event sequence_id monotonicity check in verifier CLI (cycle 41)
