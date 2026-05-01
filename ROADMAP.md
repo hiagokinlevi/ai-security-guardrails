@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Emit explicit policy decision latency_ms in audit events (cycle 39)
+- [x] Add middleware Content-Type allowlist enforcement for LLM ingress endpoints (cycle 40)
