@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add audit event sequence_id monotonicity check in verifier CLI (cycle 41)
+- [x] Fail-closed policy parse error handling with explicit startup exit code (cycle 42)
