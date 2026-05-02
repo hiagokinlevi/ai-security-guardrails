@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add startup allowlist validation for policy_decision_reason_code values (cycle 45)
+- [x] Add startup check to reject world-writable policy files (cycle 46)
