@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Fail-closed policy parse error handling with explicit startup exit code (cycle 42)
+- [x] Add deterministic policy_decision_reason_code enum with schema validation (cycle 43)
