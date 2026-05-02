@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add startup policy file SHA-256 logging and exposure in runtime config (cycle 44)
+- [x] Add startup allowlist validation for policy_decision_reason_code values (cycle 45)
