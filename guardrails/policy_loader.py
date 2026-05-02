@@ -1,39 +1,62 @@
 from __future__ import annotations
 
-import hashlib
-import logging
-from dataclasses import dataclass
-from pathlib import Path
+import sys
 from typing import Any
 
 import yaml
 
-logger = logging.getLogger(__name__)
+from guardrails.audit import emit_audit_event
+from guardrails.schemas.audit import PolicyDecisionReasonCode
+
+POLICY_LOAD_VALIDATION_EXIT_CODE = 78
 
 
-@dataclass(frozen=True)
-class RuntimeConfig:
-    policy_file_path: str
-    policy_file_sha256: str
+def _walk_reason_code_paths(node: Any, path: str = "$") -> list[tuple[str, str]]:
+    """Return list of (path, reason_code) pairs for all configured reason codes."""
+    found: list[tuple[str, str]] = []
+
+    if isinstance(node, dict):
+        if "policy_decision_reason_code" in node and isinstance(
+            node["policy_decision_reason_code"], str
+        ):
+            found.append((f"{path}.policy_decision_reason_code", node["policy_decision_reason_code"]))
+
+        for key, value in node.items():
+            child_path = f"{path}.{key}"
+            found.extend(_walk_reason_code_paths(value, child_path))
+
+    elif isinstance(node, list):
+        for idx, item in enumerate(node):
+            found.extend(_walk_reason_code_paths(item, f"{path}[{idx}]"))
+
+    return found
 
 
-def load_policy(policy_path: str | Path) -> tuple[dict[str, Any], RuntimeConfig]:
-    path = Path(policy_path)
-    raw_bytes = path.read_bytes()
-    policy = yaml.safe_load(raw_bytes) or {}
+def _validate_reason_codes_or_exit(policy: dict[str, Any]) -> None:
+    valid_codes = {member.value for member in PolicyDecisionReasonCode}
+    invalid_paths: list[str] = []
 
-    digest = hashlib.sha256(raw_bytes).hexdigest()
-    runtime_config = RuntimeConfig(
-        policy_file_path=str(path),
-        policy_file_sha256=digest,
-    )
+    for path, code in _walk_reason_code_paths(policy):
+        if code not in valid_codes:
+            invalid_paths.append(f"{path}={code}")
 
-    logger.info(
-        "Policy initialized",
-        extra={
-            "policy_file_path": runtime_config.policy_file_path,
-            "policy_file_sha256": runtime_config.policy_file_sha256,
-        },
-    )
+    if invalid_paths:
+        emit_audit_event(
+            {
+                "event_type": "policy_load_validation",
+                "action": "block",
+                "reason": "invalid_policy_decision_reason_code",
+                "details": {
+                    "invalid_reason_code_paths": invalid_paths,
+                },
+            }
+        )
+        raise SystemExit(POLICY_LOAD_VALIDATION_EXIT_CODE)
 
-    return policy, runtime_config
+
+def load_policy(path: str) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        policy = yaml.safe_load(f) or {}
+
+    _validate_reason_codes_or_exit(policy)
+    return policy
