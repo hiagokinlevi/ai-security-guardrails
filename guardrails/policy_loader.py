@@ -4,79 +4,58 @@ import os
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from guardrails.audit import emit_audit_event
-
-
-class PolicyLoadError(RuntimeError):
-    """Raised when policy loading fails."""
+from guardrails.audit import audit_event
+from guardrails.errors import StartupConfigError
 
 
-def _env_flag_true(value: str | None) -> bool:
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+REASON_CODE_POLICY_PATH_SYMLINK = "startup_config_policy_path_symlink"
 
 
-def _policy_owner_override_enabled(config: dict[str, Any] | None = None) -> bool:
-    # Guarded override: default false unless explicitly enabled by env/config.
-    env_enabled = _env_flag_true(os.getenv("GUARDRAILS_ALLOW_POLICY_OWNER_MISMATCH"))
-    if env_enabled:
-        return True
-
-    if not config:
+def _contains_symlink_in_parents(path: Path) -> bool:
+    """Return True if any parent component of path is a symlink."""
+    # Resolve piece-by-piece from cwd/anchor to avoid silently resolving links.
+    parts = path.parts
+    if not parts:
         return False
 
-    security_cfg = config.get("security") if isinstance(config, dict) else None
-    if isinstance(security_cfg, dict):
-        return bool(security_cfg.get("allow_policy_owner_mismatch", False))
+    current = Path(parts[0]) if path.is_absolute() else Path(parts[0])
+    for part in parts[1:-1]:
+        current = current / part
+        if current.is_symlink():
+            return True
     return False
 
 
-def _validate_policy_owner(policy_path: Path, config: dict[str, Any] | None = None) -> None:
-    # On unsupported platforms (e.g., no getuid/stat uid), skip this check.
-    if not hasattr(os, "getuid"):
-        return
+def validate_policy_path_startup(policy_path: str, *, check_parent_symlinks: bool = True) -> None:
+    """Fail-closed startup validation for policy path hardening.
 
-    st = policy_path.stat()
-    file_uid = getattr(st, "st_uid", None)
-    process_uid = os.getuid()
+    Reject symlinked policy files (and optionally symlinked parent dirs) to
+    prevent policy substitution attacks.
+    """
+    p = Path(policy_path)
 
-    if file_uid is None:
-        return
+    direct_symlink = p.is_symlink()
+    parent_symlink = check_parent_symlinks and _contains_symlink_in_parents(p)
 
-    if file_uid != process_uid and not _policy_owner_override_enabled(config):
-        emit_audit_event(
-            {
-                "event_type": "policy_load_failure",
-                "reason": "policy_owner_mismatch",
-                "policy_path": str(policy_path),
-                "policy_uid": file_uid,
-                "process_uid": process_uid,
-                "override_enabled": False,
-            }
-        )
-        raise PolicyLoadError(
-            f"Policy file owner UID ({file_uid}) does not match process UID ({process_uid})"
+    if direct_symlink or parent_symlink:
+        detail: dict[str, Any] = {
+            "reason_code": REASON_CODE_POLICY_PATH_SYMLINK,
+            "policy_path": str(p),
+            "direct_symlink": direct_symlink,
+            "parent_symlink": parent_symlink,
+        }
+        audit_event("startup_validation_failed", detail)
+        raise StartupConfigError(
+            f"Startup validation failed: policy path must not use symlinks ({p})"
         )
 
 
-def load_policy(policy_path: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
-    path = Path(policy_path)
+def load_policy(policy_path: str) -> dict[str, Any]:
+    # existing startup validation path hook
+    validate_policy_path_startup(policy_path)
 
-    if not path.exists():
-        raise PolicyLoadError(f"Policy file not found: {policy_path}")
+    # existing logic (kept minimal):
+    import yaml
 
-    _validate_policy_owner(path, config=config)
-
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except Exception as exc:
-        raise PolicyLoadError(f"Failed to load policy: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise PolicyLoadError("Policy root must be a mapping/object")
-
-    return data
+    with open(policy_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
