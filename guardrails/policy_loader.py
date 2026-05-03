@@ -1,61 +1,54 @@
 from __future__ import annotations
 
+import json
 import os
+import stat
+import sys
 from pathlib import Path
 from typing import Any
 
-from guardrails.audit import audit_event
-from guardrails.errors import StartupConfigError
+import yaml
 
 
-REASON_CODE_POLICY_PATH_SYMLINK = "startup_config_policy_path_symlink"
+CONFIG_SECURITY_EXIT_CODE = 78
+_OVERRIDE_ENV = "GUARDRAILS_ALLOW_INSECURE_POLICY_PERMS"
 
 
-def _contains_symlink_in_parents(path: Path) -> bool:
-    """Return True if any parent component of path is a symlink."""
-    # Resolve piece-by-piece from cwd/anchor to avoid silently resolving links.
-    parts = path.parts
-    if not parts:
-        return False
-
-    current = Path(parts[0]) if path.is_absolute() else Path(parts[0])
-    for part in parts[1:-1]:
-        current = current / part
-        if current.is_symlink():
-            return True
-    return False
+def _emit_audit(event: dict[str, Any]) -> None:
+    # Structured audit event to stderr for startup/config security failures.
+    sys.stderr.write(json.dumps(event, separators=(",", ":")) + "\n")
 
 
-def validate_policy_path_startup(policy_path: str, *, check_parent_symlinks: bool = True) -> None:
-    """Fail-closed startup validation for policy path hardening.
+def _is_override_enabled() -> bool:
+    raw = os.getenv(_OVERRIDE_ENV, "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
-    Reject symlinked policy files (and optionally symlinked parent dirs) to
-    prevent policy substitution attacks.
-    """
-    p = Path(policy_path)
 
-    direct_symlink = p.is_symlink()
-    parent_symlink = check_parent_symlinks and _contains_symlink_in_parents(p)
+def _validate_policy_file_permissions(policy_path: Path) -> None:
+    mode = policy_path.stat().st_mode
+    insecure_mask = stat.S_IWGRP | stat.S_IWOTH
+    insecure_bits = mode & insecure_mask
 
-    if direct_symlink or parent_symlink:
-        detail: dict[str, Any] = {
-            "reason_code": REASON_CODE_POLICY_PATH_SYMLINK,
-            "policy_path": str(p),
-            "direct_symlink": direct_symlink,
-            "parent_symlink": parent_symlink,
+    if insecure_bits and not _is_override_enabled():
+        event = {
+            "event": "policy_file_permission_rejected",
+            "path": str(policy_path),
+            "mode_octal": oct(stat.S_IMODE(mode)),
+            "reason": "policy file is group-writable and/or world-writable",
+            "override_env": _OVERRIDE_ENV,
         }
-        audit_event("startup_validation_failed", detail)
-        raise StartupConfigError(
-            f"Startup validation failed: policy path must not use symlinks ({p})"
-        )
+        _emit_audit(event)
+        raise SystemExit(CONFIG_SECURITY_EXIT_CODE)
 
 
-def load_policy(policy_path: str) -> dict[str, Any]:
-    # existing startup validation path hook
-    validate_policy_path_startup(policy_path)
+def load_policy(path: str | os.PathLike[str]) -> dict[str, Any]:
+    policy_path = Path(path)
+    _validate_policy_file_permissions(policy_path)
 
-    # existing logic (kept minimal):
-    import yaml
+    with policy_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
 
-    with open(policy_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Policy file must contain a top-level mapping/object")
+
+    return data
