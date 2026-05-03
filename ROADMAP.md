@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Fail startup if policy file owner does not match process user (unless explicitly overridden) (cycle 47)
+- [x] Add startup check to enforce policy file path is not a symlink (cycle 48)
