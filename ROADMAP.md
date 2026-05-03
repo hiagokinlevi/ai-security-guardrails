@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add startup check to enforce policy file path is not a symlink (cycle 48)
+- [x] Add startup policy file permission check for group/other write bits (cycle 49)
