@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Add startup check to reject world-writable policy files (cycle 46)
+- [x] Fail startup if policy file owner does not match process user (unless explicitly overridden) (cycle 47)
