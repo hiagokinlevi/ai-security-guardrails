@@ -1,22 +1,25 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class PolicyDecisionReasonCode(str, Enum):
-    prompt_injection_detected = "prompt_injection_detected"
-    pii_redacted = "pii_redacted"
-    token_budget_exceeded = "token_budget_exceeded"
-    regex_rule_match = "regex_rule_match"
-    tool_depth_exceeded = "tool_depth_exceeded"
-    content_type_blocked = "content_type_blocked"
+class AuditEventType(str, Enum):
+    INPUT_VALIDATION = "input_validation"
+    OUTPUT_VALIDATION = "output_validation"
+    POLICY_DECISION = "policy_decision"
+    STARTUP_SECURITY_CHECKS_PASSED = "startup_security_checks_passed"
 
 
-class PolicyDecisionEvent(BaseModel):
-    decision: Literal["allow", "warn", "block"]
-    policy_decision_reason_code: PolicyDecisionReasonCode = Field(
-        ..., description="Canonical deterministic reason code for policy decision"
-    )
+class StartupSecurityChecksPassedEvent(BaseModel):
+    event_type: AuditEventType = Field(default=AuditEventType.STARTUP_SECURITY_CHECKS_PASSED)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    check_names: list[str]
+    policy_path: str
+    policy_sha256: str
+    process_uid: int
+    process_gid: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
