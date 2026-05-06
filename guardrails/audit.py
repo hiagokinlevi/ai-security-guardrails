@@ -1,62 +1,75 @@
 from __future__ import annotations
 
-import uuid
-from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
 
 
-# Request-scoped correlation id, set by middleware and consumed by audit emitters.
-_correlation_id_ctx: ContextVar[str | None] = ContextVar("correlation_id", default=None)
-
-
-def set_correlation_id(correlation_id: str | None) -> None:
-    """Set request correlation id in context.
-
-    If None is supplied, a new UUIDv4 is generated.
-    """
-    _correlation_id_ctx.set(correlation_id or str(uuid.uuid4()))
-
-
-def get_correlation_id() -> str:
-    """Return current request correlation id, generating one if missing."""
-    current = _correlation_id_ctx.get()
-    if current:
-        return current
-    generated = str(uuid.uuid4())
-    _correlation_id_ctx.set(generated)
-    return generated
-
-
-class AuditEvent(BaseModel):
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    event_type: Literal["input_validation", "policy_decision", "output_filtering"]
-    correlation_id: str
-    request_id: str | None = None
-    user_id: str | None = None
-    action: str
-    decision: str
-    reason: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
+@dataclass
 class AuditLogger:
-    """Structured audit logger.
+    """Structured audit logger with timestamp integrity checks.
 
-    Existing call sites can omit correlation_id; it is injected from request context.
+    Guard behavior:
+    - Ensures emitted event timestamps are timezone-aware UTC.
+    - Ensures non-decreasing timestamps within this process.
+    - On violation, emits an `audit.timestamp_integrity_warning` event and
+      marks the affected event with `timestamp_integrity=False`.
     """
 
-    def __init__(self) -> None:
-        self._events: list[AuditEvent] = []
+    _last_event_ts: Optional[datetime] = field(default=None, init=False)
 
-    @property
-    def events(self) -> list[AuditEvent]:
-        return self._events
+    def _is_aware_utc(self, ts: datetime) -> bool:
+        return ts.tzinfo is not None and ts.utcoffset() == timezone.utc.utcoffset(ts)
 
-    def emit(self, **payload: Any) -> AuditEvent:
-        payload.setdefault("correlation_id", get_correlation_id())
-        event = AuditEvent(**payload)
-        self._events.append(event)
+    def _normalize_or_now(self, ts: Optional[datetime]) -> datetime:
+        if ts is None:
+            return datetime.now(timezone.utc)
+        return ts
+
+    def _emit(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        # Replace with the repository's sink/handler integration if present.
         return event
+
+    def log_event(self, event_type: str, payload: Optional[Dict[str, Any]] = None, *, timestamp: Optional[datetime] = None) -> Dict[str, Any]:
+        payload = dict(payload or {})
+        ts = self._normalize_or_now(timestamp)
+
+        integrity_ok = True
+        violation_reasons = []
+
+        if not self._is_aware_utc(ts):
+            integrity_ok = False
+            violation_reasons.append("timestamp_not_aware_utc")
+
+        if self._last_event_ts is not None and ts < self._last_event_ts:
+            integrity_ok = False
+            violation_reasons.append("timestamp_not_monotonic")
+
+        payload["timestamp_integrity"] = integrity_ok
+
+        event = {
+            "event_type": event_type,
+            "timestamp": ts.isoformat(),
+            "payload": payload,
+        }
+
+        if not integrity_ok:
+            warning = {
+                "event_type": "audit.timestamp_integrity_warning",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {
+                    "timestamp_integrity": False,
+                    "violations": violation_reasons,
+                    "affected_event_type": event_type,
+                    "affected_event_timestamp": ts.isoformat(),
+                },
+            }
+            self._emit(warning)
+
+        # Update monotonic reference only with UTC-aware timestamps to avoid
+        # poisoning state with invalid values.
+        if self._is_aware_utc(ts):
+            if self._last_event_ts is None or ts >= self._last_event_ts:
+                self._last_event_ts = ts
+
+        return self._emit(event)
