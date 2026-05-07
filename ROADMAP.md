@@ -56,4 +56,4 @@ Priorities may shift based on community feedback and emerging threat landscape.
 - [ ] Policy version ma
 
 ## Automated Completions
-- [x] Enforce audit event timestamp skew window at ingestion (cycle 57)
+- [x] Fail startup when policy file permissions are overly broad (must be 0600 or 0640) (cycle 58)
